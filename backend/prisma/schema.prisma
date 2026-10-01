@@ -1,0 +1,287 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id                    String   @id @default(uuid())
+  phone                 String?  @unique
+  email                 String?  @unique
+  isPhoneVerified       Boolean  @default(false)
+  isEmailVerified       Boolean  @default(false)
+  isOnboardingCompleted Boolean  @default(false)
+  activeMode            String   @default("JOINEE") // "JOINEE" | "HOST"
+  hostLevel             String   @default("NEW") // "NEW" | "RISING" | "TRUSTED" | "EXPERIENCED" | "ELITE"
+  name                  String?
+  avatarUrl             String?
+  bio                   String?
+  homeCity              String?  @default("Bengaluru")
+  interests             String   @default("[]") // Stored as JSON string array
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  hostedRooms            Room[]            @relation("HostRooms")
+  joinRequests           JoinRequest[]     @relation("UserJoinRequests")
+  roomParticipants       RoomParticipant[] @relation("UserRoomParticipants")
+  payments               Payment[]         @relation("UserPayments")
+  sentMessages           RoomMessage[]     @relation("UserSentMessages")
+  notifications          Notification[]    @relation("UserNotifications")
+  triggeredNotifications Notification[]    @relation("RelatedUserNotifications")
+  attendances            RoomAttendance[]  @relation("UserAttendance")
+  createdCheckInSessions RoomCheckInSession[] @relation("UserCreatedCheckInSessions")
+  givenRatings           Rating[]          @relation("UserGivenRatings")
+  receivedRatings        Rating[]          @relation("UserReceivedRatings")
+  loyaltyRewards         LoyaltyReward[]
+  penalties              Penalty[]         @relation("UserPenalties")
+}
+
+model OtpChallenge {
+  id          String   @id @default(uuid())
+  target      String
+  targetType  String   // "PHONE" | "EMAIL"
+  otpHash     String
+  expiresAt   DateTime
+  attempts    Int      @default(0)
+  isUsed      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([target, isUsed])
+}
+
+model Room {
+  id                         String            @id @default(uuid())
+  hostId                     String
+  host                       User              @relation("HostRooms", fields: [hostId], references: [id], onDelete: Cascade)
+  title                      String
+  description                String
+  interests                  String            @default("[]") // JSON string array
+  venueName                  String
+  venueAddress               String
+  city                       String
+  area                       String?
+  googleMapsUrl              String?
+  imageUrl                   String?
+  date                       String?
+  time                       String?
+  dateTime                   DateTime?
+  capacity                   Int
+  joiningFee                 Int
+  reservationStatus          String            @default("CONFIRMED")
+  status                     String            @default("DRAFT") // "DRAFT" | "PUBLISHED" | "UPCOMING" | "CHECK_IN_OPEN" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED"
+  confirmedParticipantsCount Int               @default(0)
+  publishedAt                DateTime?
+  createdAt                  DateTime          @default(now())
+  updatedAt                  DateTime          @updatedAt
+
+  joinRequests               JoinRequest[]
+  participants               RoomParticipant[]
+  payments                   Payment[]
+  messages                   RoomMessage[]
+  notifications              Notification[]    @relation("RoomNotifications")
+  attendances                RoomAttendance[]
+  checkInSessions            RoomCheckInSession[]
+  ratings                    Rating[]
+  penalties                  Penalty[]
+
+  @@index([hostId])
+  @@index([city])
+  @@index([status])
+}
+
+model JoinRequest {
+  id          String    @id @default(uuid())
+  roomId      String
+  room        Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  joineeId    String
+  joinee      User      @relation("UserJoinRequests", fields: [joineeId], references: [id], onDelete: Cascade)
+  status      String    @default("PENDING") // "PENDING" | "ACCEPTED" | "REJECTED" | "CANCELLED"
+  respondedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  payments      Payment[]
+  notifications Notification[] @relation("RequestNotifications")
+
+  @@index([roomId])
+  @@index([joineeId])
+  @@index([status])
+}
+
+model RoomParticipant {
+  id          String           @id @default(uuid())
+  roomId      String
+  room        Room             @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User             @relation("UserRoomParticipants", fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt    DateTime         @default(now())
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  attendances RoomAttendance[]
+
+  @@unique([roomId, userId])
+  @@index([roomId])
+  @@index([userId])
+}
+
+model Payment {
+  id                String    @id @default(uuid())
+  roomId            String
+  room              Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId            String
+  user              User      @relation("UserPayments", fields: [userId], references: [id], onDelete: Cascade)
+  joinRequestId     String
+  joinRequest       JoinRequest @relation(fields: [joinRequestId], references: [id], onDelete: Cascade)
+  amount            Int       // Total fee in INR
+  hostShare         Int       // 70% of amount
+  platformShare     Int       // 30% of amount
+  currency          String    @default("INR")
+  status            String    @default("CREATED") // "CREATED" | "PENDING" | "SUCCESS" | "FAILED" | "CANCELLED"
+  provider          String    @default("RAZORPAY")
+  providerOrderId   String?
+  providerPaymentId String?
+  providerSignature String?
+  paidAt            DateTime?
+  refundAmount      Int?
+  refundedAt        DateTime?
+  refundStatus      String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  notifications     Notification[] @relation("PaymentNotifications")
+
+  @@index([roomId])
+  @@index([userId])
+  @@index([joinRequestId])
+  @@index([status])
+}
+
+model RoomMessage {
+  id        String   @id @default(uuid())
+  roomId    String
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  senderId  String
+  sender    User     @relation("UserSentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  text      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([roomId])
+  @@index([senderId])
+  @@index([roomId, createdAt])
+}
+
+model Notification {
+  id                String       @id @default(uuid())
+  userId            String
+  user              User         @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  type              String       // "JOIN_REQUEST_RECEIVED" | "JOIN_REQUEST_ACCEPTED" | "JOIN_REQUEST_REJECTED" | "PAYMENT_REQUIRED" | "PAYMENT_SUCCESS" | "NEW_ROOM_MESSAGE"
+  title             String
+  message           String
+  roomId            String?
+  room              Room?        @relation("RoomNotifications", fields: [roomId], references: [id], onDelete: SetNull)
+  relatedUserId     String?
+  relatedUser       User?        @relation("RelatedUserNotifications", fields: [relatedUserId], references: [id], onDelete: SetNull)
+  relatedRequestId  String?
+  relatedRequest    JoinRequest? @relation("RequestNotifications", fields: [relatedRequestId], references: [id], onDelete: SetNull)
+  relatedPaymentId  String?
+  relatedPayment    Payment?     @relation("PaymentNotifications", fields: [relatedPaymentId], references: [id], onDelete: SetNull)
+  readAt            DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@index([userId])
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+}
+
+model RoomAttendance {
+  id            String           @id @default(uuid())
+  roomId        String
+  room          Room             @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User             @relation("UserAttendance", fields: [userId], references: [id], onDelete: Cascade)
+  participantId String?
+  participant   RoomParticipant? @relation(fields: [participantId], references: [id], onDelete: SetNull)
+  checkedInAt   DateTime         @default(now())
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@unique([roomId, userId])
+  @@index([roomId])
+  @@index([userId])
+}
+
+model RoomCheckInSession {
+  id              String   @id @default(uuid())
+  roomId          String
+  room            Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  createdByUserId String
+  createdBy       User     @relation("UserCreatedCheckInSessions", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  tokenHash       String
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([roomId])
+  @@index([tokenHash])
+}
+
+model Rating {
+  id          String   @id @default(uuid())
+  roomId      String
+  room        Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  reviewerId  String
+  reviewer    User     @relation("UserGivenRatings", fields: [reviewerId], references: [id], onDelete: Cascade)
+  revieweeId  String
+  reviewee    User     @relation("UserReceivedRatings", fields: [revieweeId], references: [id], onDelete: Cascade)
+  score       Int      // 1 to 5
+  review      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([roomId, reviewerId, revieweeId])
+  @@index([roomId])
+  @@index([reviewerId])
+  @@index([revieweeId])
+}
+
+model LoyaltyReward {
+  id            String    @id @default(uuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  milestone     Int       // 5, 10, 15, etc.
+  status        String    @default("AVAILABLE") // "AVAILABLE" | "USED"
+  earnedAt      DateTime  @default(now())
+  usedAt        DateTime?
+  usedForRoomId String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([userId, milestone])
+  @@index([userId])
+  @@index([status])
+}
+
+model Penalty {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation("UserPenalties", fields: [userId], references: [id], onDelete: Cascade)
+  roomId    String
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  type      String   // "HOST_CANCEL_AFTER_JOIN" | "JOINEE_NO_SHOW"
+  deduction Float    @default(0.25)
+  reason    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, roomId, type])
+  @@index([userId])
+  @@index([roomId])
+  @@index([type])
+}
+
